@@ -5,6 +5,8 @@ import sys
 import imutils
 from random import randint
 
+## capacitor,v_source
+
 def _thinningIteration(im, iter):
 	I, M = im, np.zeros(im.shape, np.uint8)
 	expr = """
