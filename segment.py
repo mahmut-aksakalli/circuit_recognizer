@@ -58,23 +58,13 @@ def skeleton_points(skel):
 	                   [1, 10, 1],
 	                   [1,  1, 1]])
 
-	# kernel for branch points
-	kernel2 = np.uint8([[0,  1, 0],
-	                    [1, 10, 1],
-	                    [0,  1, 0]])
-
 	filtered = cv2.filter2D(skel,-1,kernel)
-	filtered2 =cv2.filter2D(skel,-1,kernel2)
 
 	out = np.zeros_like(skel)
 	out[np.where(filtered > 12)] =255
-	cv2.imwrite("data/branch.pgm",out)
 
 	ends   = np.where(filtered == 11)
-	branch = np.where(filtered > 12)
-	branch_ok = np.where(filtered2 > 12)
-
-	return ends,branch,branch_ok
+	return ends
 
 def point_to_line_dist(point, line):
     # unit vector
@@ -181,7 +171,7 @@ def box_between_ends(lines):
 			if( i!=j and j>i):
 				midx2,midy2 = ((lines[j,0]+lines[j,2])/2,(lines[j,1]+lines[j,3])/2)
 				dist  = np.sqrt((midx1-midx2)**2+(midy1-midy2)**2)
-				if dist<40:
+				if dist<60:
 					c = np.where(lookup == j)
 					if len(c[0])==0:
 						cx = np.where(lookup == i)
@@ -222,15 +212,15 @@ def box_between_ends(lines):
 						(lines[z,2],lines[z,3])]))
 			tl = [tl[0]-10,tl[1]-10]
 			tr = [tr[0]+10,tr[1]-10]
-			br = [br[0]+10,br[1]+10]
-			bl = [bl[0]-10,bl[1]+10]
+			br = [br[0]+15,br[1]+15]
+			bl = [bl[0]-15,bl[1]+15]
 			box = cv2.boundingRect(np.array([tl,tr,br,bl]))
 			boxes.append([box,2])
 
 	return boxes
 
 def non_max_suppression_fast(boxes,
-                             overlapThresh = 0.2):
+                             overlapThresh = 0.1):
 
 	if len(boxes) == 0:
 	    return []
@@ -285,3 +275,93 @@ def non_max_suppression_fast(boxes,
 
 	# integer data type
 	return np.array(pick).astype("int")
+
+def remove_parallel_lines(lsd_lines,axis):
+	minThresh = 30
+	lines = []
+	result = []
+
+	## axis = 2 , means vertical lines
+	if axis == 2:
+		for line in lsd_lines:
+			x1,y1,x2,y2,w = line
+			angle = np.abs(np.rad2deg(np.arctan2(y1 - y2, x1 - x2)))
+			if angle<100 and angle>80:
+				lines.append(line)
+	## axis = 1 , means horizontal lines
+	elif axis == 1:
+		for line in lsd_lines:
+			x1,y1,x2,y2,w = line
+			angle = np.abs(np.rad2deg(np.arctan2(y1 - y2, x1 - x2)))
+			if angle>170 or angle<10:
+				lines.append(line)
+	## find all nearest pair of lines
+	lookup = np.zeros((len(lines),len(lines)),dtype=np.int)
+	lookup = lookup-1
+	i = 0
+	for line in lines:
+		j = 0
+		for test in lines:
+			if i != j and j > i:
+				 d1 = np.sqrt((test[0]-line[0])**2+(test[1]-line[1])**2)
+				 d2 = np.sqrt((test[0]-line[2])**2+(test[1]-line[3])**2)
+				 d3 = np.sqrt((test[2]-line[0])**2+(test[3]-line[1])**2)
+				 d4 = np.sqrt((test[2]-line[2])**2+(test[3]-line[3])**2)
+				 minDist = sorted([d1,d2,d3,d4])[0]
+				 if minDist < minThresh:
+					c = np.where(lookup == j)
+					if len(c[0])==0:
+						cx = np.where(lookup == i)
+						if len(cx[0])==0:
+							lookup[i,j] = j
+						elif len(cx[0])>0:
+							lookup[cx[0][0],j] = j
+					elif len(c[0])>0:
+						lookup[c[0][0],i] = i
+			j = j+1
+		i = i+1
+
+	## combine all nearest lines
+	ax1 = axis-1
+	ax2 = axis+1
+	for i in xrange(lookup.shape[0]):
+		c = np.where(lookup[i,:] != -1)
+		y = []
+		points = []
+		a = 0
+		if len(c[0])>0:
+			for j in xrange(len(c[0])):
+				index = c[0][j]
+				points.append(lines[index])
+				y.append(lines[index][ax1])
+				y.append(lines[index][ax2])
+
+			points.append(lines[i])
+			y.append(lines[i][ax1])
+			y.append(lines[i][ax2])
+			miny = sorted(y)[0]
+			maxy = sorted(y,reverse=True)[0]
+
+			for p in points:
+				if p[ax1] == miny or p[ax1] == maxy:
+					if (a == 0):
+						t1 = [int(p[0]),int(p[1])]
+						a = a + 1
+					elif (a == 1):
+						t2 = [int(p[0]),int(p[1])]
+						break
+				if p[ax2] == miny or p[ax2] == maxy:
+					if a == 0:
+						t1 = [int(p[2]),int(p[3])]
+						a = a + 1
+					elif a == 1:
+						t2 = [int(p[2]),int(p[3])]
+						break
+
+			result.append([t1[0],t1[1],t2[0],t2[1],1])
+		elif len(c[0]) ==0:
+			n = np.count_nonzero(lookup[:,i] != -1)
+			if n == 0:
+				result.append([lines[i][0],lines[i][1],lines[i][2],lines[i][3],1])
+
+	return result
